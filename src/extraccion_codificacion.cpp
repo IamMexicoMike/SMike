@@ -10,7 +10,7 @@
 using namespace cv;
 using namespace std;
 
-IplImage* ScreenCap_Ipl()
+Mat screen_cap()
 {
   IplImage *img;
   int nWidth;
@@ -76,23 +76,23 @@ IplImage* ScreenCap_Ipl()
   ::DeleteDC(hMemDC);
   ::DeleteObject(hWnd);
 
-  return img;
+  return Mat(img);
 }
 
-std::string codificar(cv::Mat& src)
+std::shared_ptr<vector<unsigned char>> codificar(cv::Mat& src, float factor_rsz=0.75)
 {
   //cout << src.cols*src.rows*3 << '\t';
   vector<unsigned char> buffer;
   cvtColor(src, src, CV_BGR2GRAY);
-  const float factor_rsz=0.75;
   Size nvo_tam(src.cols*factor_rsz, src.rows*factor_rsz);
   resize(src,src,nvo_tam);
   vector<int> compression_params;
     compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
     compression_params.push_back(50);
 
-  cv::imencode(".jpg", src, buffer,compression_params);
+  cv::imencode(".jpg", src, (buffer),compression_params);
   cout << buffer.size() << '\t'; //217 es D9, lo cual es correcto. El end of frame es FFD9
+  shared_ptr<vector<unsigned char>> copia = make_shared<vector<unsigned char>>(std::move(buffer)); //la ponemos bajo la custodia de un shared_ptr
 
   //Mat frame = cv::imdecode(buffer, CV_LOAD_IMAGE_COLOR);
   //cout << "\tframe w,h="<< frame.cols << "," <<frame.rows <<"\n";
@@ -102,8 +102,16 @@ std::string codificar(cv::Mat& src)
   //thread t(mostrar, std::ref(frame));
   //t.detach();
 
-  return string(buffer.begin(), buffer.end());
+  return copia;
   //return string(src.begin<unsigned char>(), src.end<unsigned char>());
+}
+
+cv::Mat frame_camara()
+{
+  static VideoCapture cap(0);
+  Mat m;
+  cap >> m;
+  return m;
 }
 
 int solucionador_de_pedos(int i, const char* c1, const char* c2, const char* c3, int j, void* pf)

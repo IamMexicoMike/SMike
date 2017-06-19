@@ -9,13 +9,20 @@ using namespace cv;
 
 vector<char> cuadro_global(1024*1024);
 
+shared_ptr<vector<unsigned char>> ptr_a_str(string s)
+{
+  vector<unsigned char> vs(s.begin(), s.end());
+  return make_shared<vector<unsigned char>>(vs);
+}
+
 /**consiste de un socket cliente, un puerto serial, un nombre de servicio a proveer*/
 class fwd
 {
 public:
-  fwd(asio::io_service& io_service, std::string ip, std::string puerto_tcp) :
+  fwd(asio::io_service& io_service, std::string ip, std::string puerto_tcp, cv::Mat (*funcion)() ) :
     iosvc_(io_service),
     socket_(io_service),
+    fun_arg(funcion),
     temporizador_(io_service)
   {
     asio::ip::tcp::resolver resolvedor(io_service);
@@ -26,13 +33,12 @@ public:
   }
   void iniciar()
   {
-    iniciar_temporizador();
     conectar_socket();
   }
 
   void conectar_socket();
   void leer_socket();
-  void escribir_socket(std::string str);
+  void escribir_socket(shared_ptr<vector<unsigned char>> copia);
 
 
 private:
@@ -45,8 +51,12 @@ private:
   asio::ip::tcp::socket socket_;
   asio::ip::tcp::endpoint endpoint_;
 
+  cv::Mat (*fun_arg)();
+
   asio::steady_timer temporizador_;
   bool cerrar_{false};
+
+
 };
 
 /**                 socket                       */
@@ -54,13 +64,13 @@ private:
 void fwd::iniciar_temporizador()
 {
   asio::error_code ec;
-  temporizador_.expires_from_now(std::chrono::milliseconds(2000), ec);
+  temporizador_.expires_from_now(std::chrono::milliseconds(60), ec);
   temporizador_.async_wait([this](std::error_code ec)
   {
     if(!ec)
     {
-      Mat m(ScreenCap_Ipl());
-      escribir_socket(codificar(m));
+      Mat m = fun_arg();
+      escribir_socket(codificar(m, 0.75) );
     }
 
     else
@@ -82,10 +92,12 @@ void fwd::conectar_socket()
           << ":" << this->socket_.remote_endpoint().port() << '\n';
       string login="mike;ftw;";
       cout << "LOGIN: " << login;
-      escribir_socket(login);
+      escribir_socket(ptr_a_str(login)); /*esto se hace para que el lambda no se refiera a algo volatil*/
       Sleep(200);
       string peticion="ofrecer desk";
-      escribir_socket(peticion);
+      escribir_socket(ptr_a_str(peticion));/*el lambda guardara una copia del shared_ptr que apunta a estos datos*/
+      Sleep(200);
+      iniciar_temporizador();
 
       leer_socket();
     }
@@ -127,11 +139,9 @@ void fwd::leer_socket()
   });
 }
 
-void fwd::escribir_socket(std::string str)
+void fwd::escribir_socket(shared_ptr<vector<unsigned char>> copia)
 {
-  tx_buf_socket_ = str;
-  //cout << str;
-  asio::async_write(socket_, asio::buffer(tx_buf_socket_.data(), tx_buf_socket_.size()),
+  asio::async_write(socket_, asio::buffer(*copia),
     [this](std::error_code ec, std::size_t len)
   {
     if (!ec)
@@ -267,7 +277,7 @@ void renderizar()
 {
   cv::redirectError(solucionador_de_pedos);
   namedWindow("cuadro"); //una cicatriz en la cara de París
-  while(waitKey(300) != 'q')
+  while(waitKey(30) != 'q')
   {
     if(cuadro_global.size() > 0)
     {
@@ -287,9 +297,10 @@ void renderizar()
 
 int main(int argc, char* argv[])
 {
-  if(argc != 2)
+  if(argc < 2)
   {
     cout << argc <<" Por favor ingresa como argumento del programa \"cliente\" o \"servidor\" dependiendo de que quieras\n";
+    cout << argc <<" Si el argumento es servidor, si ingresas \"cam\" o \"camara\" se distribuira esta";
     exit(0);
   }
 
@@ -299,15 +310,37 @@ int main(int argc, char* argv[])
 
     if(strcmp( argv[1], "servidor") == 0)
     {
-      fwd escaner_escritorio(servicio, "201.139.98.214", "3214");
-      escaner_escritorio.iniciar();
-      servicio.run();
+
+      if(argc > 2)
+      {
+        if(strcmp( argv[2], "cam") == 0 || strcmp( argv[2], "camara") == 0)
+        {
+          fwd forwarder(servicio, "201.139.127.78", "3214", &frame_camara);
+          forwarder.iniciar();
+          servicio.run();
+        }
+
+        else
+        {
+          cout << "argumento no reconocido. Saliendo...\n";
+          exit(-1);
+        }
+      }
+      else
+      {
+        fwd forwarder(servicio, "201.139.127.78", "3214", &screen_cap);
+        forwarder.iniciar();
+        servicio.run();
+      }
+
+
+
     }
 
     else if(strcmp( argv[1], "cliente") == 0)
     {
       thread t(renderizar);
-      receptor receptor_escritorio(servicio, "201.139.98.214", "3214");
+      receptor receptor_escritorio(servicio, "201.139.127.78", "3214");
       receptor_escritorio.iniciar();
       servicio.run();
       t.join();
@@ -323,6 +356,26 @@ int main(int argc, char* argv[])
   {
     cout << e.what() << '\n';
   }
+
+  /*
+  cv::VideoCapture cap(0);
+
+  cv::namedWindow("camara");
+  cv::Mat f;
+
+  cout << cap.get(CV_CAP_PROP_FPS) << '\n';
+  cout << cap.get(CV_CAP_PROP_FRAME_WIDTH) << '\n';
+  cout << cap.get(CV_CAP_PROP_FRAME_HEIGHT) << '\n';
+  //cout << cap.get() << '\n';
+  //cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280);
+  //cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+
+  for(char c=0; c!=27; )
+  {
+    cap >> f;
+    cv::imshow("camara", f);
+    c = cv::waitKey(30);
+  }*/
 
   return 0;
 }
